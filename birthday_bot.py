@@ -1,5 +1,7 @@
 # birthday_bot.py
 import os
+os.environ["DISCORD_NO_VOICE"] = "1"
+
 import sqlite3
 import asyncio
 import random
@@ -9,8 +11,6 @@ from zoneinfo import ZoneInfo
 import discord
 from discord.ext import commands, tasks
 from discord import app_commands
-discord.voice_client = None
-
 # ---------------- ENV / CONFIG ----------------
 TOKEN = os.getenv("DISCORD_TOKEN")
 if not TOKEN:
