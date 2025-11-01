@@ -80,12 +80,30 @@ def init_db():
         remind_date  TEXT NOT NULL,
         PRIMARY KEY (guild_id, user_id, remind_date)
     );
+    
+    CREATE TABLE IF NOT EXISTS birthdays (
+        guild_id      INTEGER NOT NULL,
+        user_id       INTEGER NOT NULL,
+        bday_day      INTEGER NOT NULL,
+        bday_month    INTEGER NOT NULL,
+        bday_year     INTEGER,
+        timezone      TEXT,
+        show_year     INTEGER DEFAULT 0,
+        birthday_wish TEXT,
+        UNIQUE(guild_id, user_id)
+    );
+    
     """)
     # ensure legacy DBs get birthday_wish
     cur.execute("PRAGMA table_info(birthdays)")
     cols = [r[1] for r in cur.fetchall()]
+
     if "birthday_wish" not in cols:
         cur.execute("ALTER TABLE birthdays ADD COLUMN birthday_wish TEXT")
+
+    if "favourite_cake" not in cols:
+        cur.execute("ALTER TABLE birthdays ADD COLUMN favourite_cake TEXT")
+
     con.commit()
     con.close()
 
@@ -104,7 +122,7 @@ HBD_LYRICS = [
     "🎵 Happy birthday to you…",
     "🎵 Happy birthday to you…",
     "🎵 Happy birthday dear {name}…",
-    "🎵 Happy birthday to youuu! 🎂✨"
+    "🎵 Happy birthday to youuuu! 🎂✨"
 ]
 
 # ---------------- UTILS ----------------
