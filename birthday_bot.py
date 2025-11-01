@@ -1,4 +1,9 @@
 # birthday_bot.py
+# Cakey – advanced birthday bot (modal + wishes + 7-day reminder)
+# ---------------------------------------------------------------
+# NOTE (for Railway):
+#   - set DISCORD_NO_VOICE before importing discord
+#   - set envs: DISCORD_TOKEN, DEFAULT_TZ, DB_PATH
 import os
 os.environ["DISCORD_NO_VOICE"] = "1"
 
@@ -17,10 +22,7 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 if not TOKEN:
     raise RuntimeError("Set DISCORD_TOKEN")
 
-# server default timezone (you can change per guild via /birthday default_tz)
 DEFAULT_TZ = os.getenv("DEFAULT_TZ", "Europe/London")
-
-# persistent DB location (on Railway set DB_PATH=/data/birthdays.db)
 DB_PATH = os.getenv("DB_PATH", "birthdays.db")
 
 INTENTS = discord.Intents.default()
@@ -31,6 +33,10 @@ bot = commands.Bot(command_prefix="!", intents=INTENTS)
 
 # ---------------- DB HELPERS ----------------
 def db():
+    # make sure dir exists if path is like /data/birthdays.db
+    folder = os.path.dirname(DB_PATH)
+    if folder and not os.path.exists(folder):
+        os.makedirs(folder, exist_ok=True)
     con = sqlite3.connect(DB_PATH)
     con.row_factory = sqlite3.Row
     return con
@@ -41,19 +47,18 @@ def init_db():
     cur.executescript("""
     PRAGMA journal_mode=WAL;
 
-    -- user birthdays
     CREATE TABLE IF NOT EXISTS birthdays (
-        guild_id    INTEGER NOT NULL,
-        user_id     INTEGER NOT NULL,
-        bday_day    INTEGER NOT NULL,
-        bday_month  INTEGER NOT NULL,
-        bday_year   INTEGER,
-        timezone    TEXT,
-        show_year   INTEGER DEFAULT 0,
+        guild_id      INTEGER NOT NULL,
+        user_id       INTEGER NOT NULL,
+        bday_day      INTEGER NOT NULL,
+        bday_month    INTEGER NOT NULL,
+        bday_year     INTEGER,
+        timezone      TEXT,
+        show_year     INTEGER DEFAULT 0,
+        birthday_wish TEXT,
         UNIQUE(guild_id, user_id)
     );
 
-    -- guild settings
     CREATE TABLE IF NOT EXISTS guild_settings (
         guild_id          INTEGER PRIMARY KEY,
         announce_channel  INTEGER,
@@ -62,7 +67,6 @@ def init_db():
         default_timezone  TEXT
     );
 
-    -- daily announce log
     CREATE TABLE IF NOT EXISTS bday_announced (
         guild_id     INTEGER NOT NULL,
         user_id      INTEGER NOT NULL,
@@ -70,7 +74,6 @@ def init_db():
         PRIMARY KEY (guild_id, user_id, announce_date)
     );
 
-    -- 7-day reminder log
     CREATE TABLE IF NOT EXISTS bday_reminded (
         guild_id     INTEGER NOT NULL,
         user_id      INTEGER NOT NULL,
@@ -78,6 +81,11 @@ def init_db():
         PRIMARY KEY (guild_id, user_id, remind_date)
     );
     """)
+    # ensure legacy DBs get birthday_wish
+    cur.execute("PRAGMA table_info(birthdays)")
+    cols = [r[1] for r in cur.fetchall()]
+    if "birthday_wish" not in cols:
+        cur.execute("ALTER TABLE birthdays ADD COLUMN birthday_wish TEXT")
     con.commit()
     con.close()
 
@@ -120,20 +128,9 @@ def set_guild_setting(guild_id: int, **kwargs):
     con.commit()
     con.close()
 
-def format_birthday(row, include_age=True):
-    day = row["bday_day"]
-    month = row["bday_month"]
-    year = row["bday_year"]
-    show_year = row["show_year"] == 1
-    if not show_year or not year:
-        return f"{day:02d}-{month:02d}"
-    if include_age:
-        today = date.today()
-        age = today.year - year
-        if (today.month, today.day) < (month, day):
-            age -= 1
-        return f"{day:02d}-{month:02d}-{year} ({age})"
-    return f"{day:02d}-{month:02d}-{year}"
+def format_birthday(row):
+    # day-month only
+    return f"{row['bday_day']:02d}-{row['bday_month']:02d}"
 
 def user_local_today(tz_str: str | None):
     try:
@@ -219,13 +216,9 @@ async def announce_birthday(guild: discord.Guild, member: discord.Member, settin
             )
             embed.add_field(name="Birthday", value=bday_str, inline=True)
 
-            # show age if user allowed it
-            if bday_row["show_year"] == 1 and bday_row["bday_year"]:
-                today = date.today()
-                age = today.year - bday_row["bday_year"]
-                if (today.month, today.day) < (bday_row["bday_month"], bday_row["bday_day"]):
-                    age -= 1
-                embed.add_field(name="Age", value=str(age), inline=True)
+            # if they had a wish, add it
+            if bday_row["birthday_wish"]:
+                embed.add_field(name="Wish", value=bday_row["birthday_wish"][:200], inline=False)
 
             if member.display_avatar:
                 embed.set_author(name=member.display_name, icon_url=member.display_avatar.url)
@@ -303,7 +296,6 @@ async def birthday_prechecker():
 
     today_utc = date.today().isoformat()
 
-    # group by guild
     guild_map = {}
     for row in all_bdays:
         guild_map.setdefault(row["guild_id"], []).append(row)
@@ -324,7 +316,6 @@ async def birthday_prechecker():
             user_tz = row["timezone"] or (settings_row["default_timezone"] if settings_row and settings_row["default_timezone"] else DEFAULT_TZ)
             user_today, _ = user_local_today(user_tz)
 
-            # birthday in user's year
             bday = date(user_today.year, row["bday_month"], row["bday_day"])
             if bday < user_today:
                 bday = date(user_today.year + 1, row["bday_month"], row["bday_day"])
@@ -364,62 +355,64 @@ async def before_prechecker():
     print("7-day birthday prechecker started.")
 
 # ---------------- COG / SLASH COMMANDS ----------------
+class BirthdayModal(discord.ui.Modal, title="Set your birthday"):
+    day = discord.ui.TextInput(label="Day (1-31)", placeholder="31", max_length=2)
+    month = discord.ui.TextInput(label="Month (1-12)", placeholder="10", max_length=2)
+    wish = discord.ui.TextInput(label="Birthday wish (optional)", style=discord.TextStyle.paragraph, required=False, max_length=200)
+
+    def __init__(self, interaction: discord.Interaction):
+        super().__init__()
+        self.interaction = interaction
+
+    async def on_submit(self, interaction: discord.Interaction):
+        guild = interaction.guild
+        user = interaction.user
+
+        # validate
+        try:
+            day_i = int(str(self.day.value).strip())
+            month_i = int(str(self.month.value).strip())
+            _ = datetime(2000, month_i, day_i)
+        except Exception:
+            return await interaction.response.send_message("❌ Day/Month invalid. Use e.g. day=31, month=10", ephemeral=True)
+
+        wish_text = str(self.wish.value).strip() if self.wish.value else None
+
+        settings_row = get_guild_settings(guild.id)
+        auto_tz = settings_row["default_timezone"] if (settings_row and settings_row["default_timezone"]) else DEFAULT_TZ
+
+        con = db()
+        cur = con.cursor()
+        cur.execute("""
+            INSERT INTO birthdays (guild_id, user_id, bday_day, bday_month, timezone, show_year, birthday_wish)
+            VALUES (?, ?, ?, ?, ?, 0, ?)
+            ON CONFLICT(guild_id, user_id) DO UPDATE SET
+                bday_day=excluded.bday_day,
+                bday_month=excluded.bday_month,
+                timezone=excluded.timezone,
+                show_year=0,
+                birthday_wish=excluded.birthday_wish
+        """, (guild.id, user.id, day_i, month_i, auto_tz, wish_text))
+        con.commit()
+        con.close()
+
+        await interaction.response.send_message(
+            f"✅ Saved **{day_i:02d}-{month_i:02d}**. Timezone: `{auto_tz}`" + (f"\n📝 Wish: {wish_text}" if wish_text else ""),
+            ephemeral=True
+        )
+
 class BirthdayCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
     group = app_commands.Group(name="birthday", description="Birthday commands")
 
+    # /birthday set -> modal
     @group.command(name="set", description="Set your birthday")
-    @app_commands.describe(
-        date="Your birthday in YYYY-MM-DD",
-        timezone="Your timezone, e.g. Europe/London",
-        show_year="Show your birth year to others?"
-    )
-    async def set_birthday(self, interaction: discord.Interaction, date: str, timezone: str | None = None, show_year: bool = False):
-        guild = interaction.guild
-        if not guild:
-            return await interaction.response.send_message("This only works in a server.", ephemeral=True)
+    async def set_birthday(self, interaction: discord.Interaction):
+        await interaction.response.send_modal(BirthdayModal(interaction))
 
-        # parse date
-        try:
-            parts = date.split("-")
-            if len(parts) != 3:
-                raise ValueError
-            year_i = int(parts[0])
-            month_i = int(parts[1])
-            day_i = int(parts[2])
-            _ = datetime(year_i, month_i, day_i)
-        except ValueError:
-            return await interaction.response.send_message("❌ Use format `YYYY-MM-DD`", ephemeral=True)
-
-        # validate timezone
-        if timezone:
-            try:
-                _ = ZoneInfo(timezone)
-            except Exception:
-                return await interaction.response.send_message("❌ Invalid timezone. Example: `Europe/London` or `Asia/Qatar`", ephemeral=True)
-
-        con = db()
-        cur = con.cursor()
-        cur.execute("""
-            INSERT INTO birthdays (guild_id, user_id, bday_day, bday_month, bday_year, timezone, show_year)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(guild_id, user_id) DO UPDATE SET
-                bday_day=excluded.bday_day,
-                bday_month=excluded.bday_month,
-                bday_year=excluded.bday_year,
-                timezone=excluded.timezone,
-                show_year=excluded.show_year
-        """, (guild.id, interaction.user.id, day_i, month_i, year_i, timezone, 1 if show_year else 0))
-        con.commit()
-        con.close()
-
-        await interaction.response.send_message(
-            f"✅ Birthday saved as **{day_i:02d}-{month_i:02d}-{year_i}**. Timezone: `{timezone or DEFAULT_TZ}`. Year visible: `{show_year}`",
-            ephemeral=True
-        )
-
+    # /birthday view
     @group.command(name="view", description="View someone's birthday")
     async def view_birthday(self, interaction: discord.Interaction, user: discord.Member | None = None):
         user = user or interaction.user
@@ -431,7 +424,7 @@ class BirthdayCog(commands.Cog):
         if not row:
             return await interaction.response.send_message("No birthday set for that user.", ephemeral=True)
 
-        bday_str = format_birthday(row, include_age=True)
+        bday_str = format_birthday(row)
         tz = row["timezone"] or DEFAULT_TZ
         embed = discord.Embed(
             title=f"🎂 {user.display_name}'s birthday",
@@ -439,8 +432,11 @@ class BirthdayCog(commands.Cog):
             colour=discord.Colour.blurple()
         )
         embed.add_field(name="Timezone", value=tz)
+        if row["birthday_wish"]:
+            embed.add_field(name="Wish", value=row["birthday_wish"], inline=False)
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
+    # /birthday upcoming
     @group.command(name="upcoming", description="Show upcoming birthdays")
     @app_commands.describe(days="How many days ahead to look (default 30)")
     async def upcoming(self, interaction: discord.Interaction, days: int = 30):
@@ -480,6 +476,7 @@ class BirthdayCog(commands.Cog):
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
+    # /birthday list
     @group.command(name="list", description="List all birthdays for a month")
     @app_commands.describe(month="Month number 1-12")
     async def list_month(self, interaction: discord.Interaction, month: int):
@@ -504,6 +501,7 @@ class BirthdayCog(commands.Cog):
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
+    # ADMIN: /birthday channel
     @group.command(name="channel", description="Set the birthday announce channel (admin)")
     @app_commands.describe(channel="Channel to post birthday messages")
     async def set_channel(self, interaction: discord.Interaction, channel: discord.TextChannel):
@@ -512,6 +510,7 @@ class BirthdayCog(commands.Cog):
         set_guild_setting(interaction.guild_id, announce_channel=channel.id)
         await interaction.response.send_message(f"✅ Announce channel set to {channel.mention}", ephemeral=True)
 
+    # ADMIN: /birthday role
     @group.command(name="role", description="Set the birthday role (admin)")
     @app_commands.describe(role="Role to give on birthday for 24h")
     async def set_role(self, interaction: discord.Interaction, role: discord.Role):
@@ -520,6 +519,7 @@ class BirthdayCog(commands.Cog):
         set_guild_setting(interaction.guild_id, birthday_role=role.id)
         await interaction.response.send_message(f"✅ Birthday role set to {role.mention}", ephemeral=True)
 
+    # ADMIN: /birthday message
     @group.command(name="message", description="Set the birthday announce message (admin)")
     @app_commands.describe(text="Use {mention}, {user}, {date}")
     async def set_message(self, interaction: discord.Interaction, text: str):
@@ -528,6 +528,7 @@ class BirthdayCog(commands.Cog):
         set_guild_setting(interaction.guild_id, announce_text=text)
         await interaction.response.send_message("✅ Birthday message updated.", ephemeral=True)
 
+    # ADMIN: /birthday default_tz
     @group.command(name="default_tz", description="Set default timezone for this guild (admin)")
     async def set_default_tz(self, interaction: discord.Interaction, timezone: str):
         if not interaction.user.guild_permissions.manage_guild:
@@ -539,7 +540,38 @@ class BirthdayCog(commands.Cog):
         set_guild_setting(interaction.guild_id, default_timezone=timezone)
         await interaction.response.send_message(f"✅ Default timezone set to `{timezone}`", ephemeral=True)
 
-# ---------------- TREE SYNC ----------------
+    # ADMIN: /birthday wishes
+    @group.command(name="wishes", description="(admin) View birthday wishes")
+    async def view_wishes(self, interaction: discord.Interaction):
+        if not interaction.user.guild_permissions.manage_guild:
+            return await interaction.response.send_message("You need Manage Server to view wishes.", ephemeral=True)
+        con = db()
+        cur = con.cursor()
+        cur.execute("""
+            SELECT * FROM birthdays
+            WHERE guild_id=? AND birthday_wish IS NOT NULL AND birthday_wish <> ''
+            ORDER BY bday_month, bday_day
+        """, (interaction.guild_id,))
+        rows = cur.fetchall()
+        con.close()
+
+        if not rows:
+            return await interaction.response.send_message("No wishes submitted yet 💤", ephemeral=True)
+
+        lines = []
+        for r in rows[:25]:
+            member = interaction.guild.get_member(r["user_id"])
+            name = member.display_name if member else f"User {r['user_id']}"
+            lines.append(f"**{r['bday_day']:02d}-{r['bday_month']:02d}** — {name}:\n> {r['birthday_wish'][:180]}")
+
+        embed = discord.Embed(
+            title="🎁 Birthday wishes",
+            description="\n\n".join(lines),
+            colour=discord.Colour.purple()
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
 async def setup_tree():
     await bot.wait_until_ready()
     bot.tree.add_command(BirthdayCog(bot).group)
