@@ -187,7 +187,7 @@ async def sing_happy_birthday(channel: discord.TextChannel, member: discord.Memb
         line = line.replace("{name}", display_name)
         await channel.send(line)
         await asyncio.sleep(1.3)
-    await channel.send(f"🎉 Drop some love for {member.mention} in here or you’re off the guestlist.")
+    await channel.send(f"🎉 Drop some love for {member.mention} in here or you’re off the guestlist.😅")
 
 # ---------------- ANNOUNCE (card + role + sing) ----------------
 async def announce_birthday(guild: discord.Guild, member: discord.Member, settings_row, bday_row):
