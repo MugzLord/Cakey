@@ -585,7 +585,7 @@ class BirthdayCog(commands.Cog):
         set_guild_setting(interaction.guild_id, default_timezone=timezone)
         await interaction.response.send_message(f"✅ Default timezone set to `{timezone}`", ephemeral=True)
 
-        @group.command(name="set_for", description="(admin) Set or change someone's birthday")
+    @group.command(name="set_for", description="(admin) Set or change someone's birthday")
     @app_commands.describe(
         user="Member to set the birthday for",
         day="Day 1-31",
