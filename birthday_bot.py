@@ -445,6 +445,51 @@ class BirthdayModal(discord.ui.Modal, title="Set your birthday"):
             ephemeral=True,
         )
 
+        # funny confirmation
+        today = date.today()
+        next_bday = date(today.year, month_i, day_i)
+        if next_bday < today:
+            next_bday = date(today.year + 1, month_i, day_i)
+        days_left = (next_bday - today).days
+
+        funny_lines = [
+            f"Alright {user.mention}, I’ve scribbled **{day_i:02d}-{month_i:02d}** in frosting on my calendar 🍰 ({days_left} days to go).",
+            f"Got it {user.mention}! I’ll start pre-heating the chaos oven 🔥 — your big day’s in **{days_left} days**.",
+            f"Duly noted {user.mention}. Expect confetti, cake, and mild regret in **{days_left} days** 🎈.",
+            f"Okay {user.mention}, birthday locked in. I’ll pretend to forget until **{days_left} days** from now 😏.",
+            f"Mark my frosting-covered words, {user.mention} — **{days_left} days** till your glorious descent into more candles 🕯️.",
+            f"Calendar updated, {user.mention}. I’ll annoy everyone about you in **{days_left} days** 💅.",
+            f"Saved. {user.mention} will be officially unbearable in **{days_left} days** 😌.",
+            f"Done ✅ {user.mention}, I’ll ping the whole house in **{days_left} days** like a proud aunty.",
+            f"{user.mention} has chosen violence on **{day_i:02d}-{month_i:02d}**. Countdown: **{days_left} days** ⚔️🎂",
+            f"Your day is locked, {user.mention}. Don’t change it or I’m telling Jas. **{days_left} days** 👀",
+            f"Birthday entered. I’ll act surprised in **{days_left} days**, promise 🤭.",
+            f"Alright starboy/starbabe {user.mention}, **{days_left} days** till we shout about you in caps 💜.",
+            f"I’ve put **{day_i:02d}-{month_i:02d}** in pen, not pencil. That’s commitment, {user.mention}. **{days_left} days** 📝",
+            f"Noted, {user.mention}. I’ll be extremely dramatic about it in **{days_left} days** 🎭.",
+            f"Schedule updated 📅 → {user.mention} gets attention in **{days_left} days**. Everyone else: cope.",
+            f"OOOH okay {user.mention}, birthday princess/prince energy arriving in **{days_left} days** 👑.",
+            f"Thanks, {user.mention}. I’ll drag everyone back to the channel in **{days_left} days** 🫡.",
+            f"Copy that. {user.mention} → **{day_i:02d}-{month_i:02d}** → cake → chaos → **{days_left} days**.",
+            f"Logged. If anyone says ‘I forgot’, I’ll show them this. **{days_left} days**, {user.mention} 🧾.",
+            f"Okayyy {user.mention}, attention deposit received. Collection in **{days_left} days** 💅.",
+            f"Your birthday has been uploaded to the Cloud of Vibes ☁️ {user.mention} — **{days_left} days**.",
+            f"Reminder armed. In **{days_left} days** I will roast you lovingly, {user.mention} 🔔.",
+            f"Booked, blessed, and ready. {user.mention} is due celebration in **{days_left} days** 🙌.",
+            f"{user.mention}, I will loudly expose your birthday in **{days_left} days** like a proper Discord auntie 🫶.",
+            f"Okay but don’t act surprised when I scream about it in **{days_left} days**, {user.mention} 😌.",
+            f"Set. If the server forgets, I won’t. **{days_left} days** till {user.mention} becomes the main character ✨.",
+            f"Birthday secured 🔐 {user.mention} → **{day_i:02d}-{month_i:02d}** → I’m telling everyone in **{days_left} days**.",
+            f"Nice try hiding, {user.mention}. I caught it. **{days_left} days** till your cake day 🎂.",
+            f"Calendar says: ‘Disturb {user.mention} with love in **{days_left} days**.’ I obey calendars 📅.",
+            f"Alright then, chaos child {user.mention} — **{days_left} days** and we’re singing off-key 🎤.",
+        ]
+
+        funny_reply = random.choice(funny_lines)
+
+        await interaction.followup.send(funny_reply)
+
+
 
 class BirthdayCog(commands.Cog):
     def __init__(self, bot):
