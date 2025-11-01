@@ -372,17 +372,23 @@ async def before_prechecker():
     await bot.wait_until_ready()
     print("7-day birthday prechecker started.")
 
+
 # ---------------- COG / SLASH COMMANDS ----------------
 class BirthdayModal(discord.ui.Modal, title="Set your birthday"):
     day = discord.ui.TextInput(label="Day (1-31)", placeholder="31", max_length=2)
     month = discord.ui.TextInput(label="Month (1-12)", placeholder="10", max_length=2)
-    wish = discord.ui.TextInput(label="Birthday wish (optional)", style=discord.TextStyle.paragraph, required=False, max_length=200)
+    wish = discord.ui.TextInput(
+        label="Birthday wish (optional)",
+        style=discord.TextStyle.paragraph,
+        required=False,
+        max_length=200,
+    )
 
     def __init__(self, interaction: discord.Interaction):
         super().__init__()
         self.interaction = interaction
 
-        async def on_submit(self, interaction: discord.Interaction):
+    async def on_submit(self, interaction: discord.Interaction):
         guild = interaction.guild
         user = interaction.user
 
@@ -390,40 +396,53 @@ class BirthdayModal(discord.ui.Modal, title="Set your birthday"):
         try:
             day_i = int(str(self.day.value).strip())
             month_i = int(str(self.month.value).strip())
-            _ = datetime(2000, month_i, day_i)
+            _ = datetime(2000, month_i, day_i)  # just to validate
         except Exception:
-            return await interaction.response.send_message("❌ Day/Month invalid. Use e.g. day=31, month=10", ephemeral=True)
+            return await interaction.response.send_message(
+                "❌ Day/Month invalid. Use e.g. day=31, month=10",
+                ephemeral=True,
+            )
 
         wish_text = str(self.wish.value).strip() if self.wish.value else None
 
         # check if user already has a birthday
         con = db()
         cur = con.cursor()
-        cur.execute("SELECT 1 FROM birthdays WHERE guild_id=? AND user_id=?", (guild.id, user.id))
+        cur.execute(
+            "SELECT 1 FROM birthdays WHERE guild_id=? AND user_id=?",
+            (guild.id, user.id),
+        )
         already = cur.fetchone()
 
         settings_row = get_guild_settings(guild.id)
-        auto_tz = settings_row["default_timezone"] if (settings_row and settings_row["default_timezone"]) else DEFAULT_TZ
+        auto_tz = (
+            settings_row["default_timezone"]
+            if (settings_row and settings_row["default_timezone"])
+            else DEFAULT_TZ
+        )
 
         if already:
-            # don't overwrite – tell them to ask admin
             con.close()
             return await interaction.response.send_message(
                 "⚠️ You already set your birthday. Ask an admin to change it with `/birthday set_for @you`.",
-                ephemeral=True
+                ephemeral=True,
             )
 
         # insert new
-        cur.execute("""
+        cur.execute(
+            """
             INSERT INTO birthdays (guild_id, user_id, bday_day, bday_month, timezone, show_year, birthday_wish)
             VALUES (?, ?, ?, ?, ?, 0, ?)
-        """, (guild.id, user.id, day_i, month_i, auto_tz, wish_text))
+            """,
+            (guild.id, user.id, day_i, month_i, auto_tz, wish_text),
+        )
         con.commit()
         con.close()
 
         await interaction.response.send_message(
-            f"✅ Saved **{day_i:02d}-{month_i:02d}**. Timezone: `{auto_tz}`" + (f"\n📝 Wish: {wish_text}" if wish_text else ""),
-            ephemeral=True
+            f"✅ Saved **{day_i:02d}-{month_i:02d}**. Timezone: `{auto_tz}`"
+            + (f"\n📝 Wish: {wish_text}" if wish_text else ""),
+            ephemeral=True,
         )
 
 
